@@ -56,6 +56,7 @@ text-mining links are frequently paywalled and are not reliable open-access sign
 | --- | --- | --- |
 | `SCIHUB_MCP_CONTACT_EMAIL` | Contact email for Unpaywall (required by its terms) and the OpenAlex polite pool. Without it, Unpaywall is skipped. `UNPAYWALL_EMAIL` is accepted as a fallback name. | unset |
 | `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK` | Enable the Sci-Hub last-resort fallback. Set to `0`/`false`/`no`/`off` to disable. | `1` (enabled) |
+| `SCIHUB_MCP_SCIHUB_MIRRORS` | Comma-separated Sci-Hub mirrors for the last-resort fallback, e.g. `sci-hub.ru,sci-hub.se`. Use only where you have the legal right to access the content. | `sci-hub.ru` |
 | `SCIHUB_MCP_OA_PROVIDERS` | Comma-separated provider order/subset override, e.g. `unpaywall,openalex`. Unknown names are ignored. | full default order |
 | `CORE_API_KEY` | Enables the CORE provider when set. | unset |
 
@@ -67,13 +68,11 @@ most effective open-access source, and is required by Unpaywall's API terms.
 - Python 3.10+
 - `mcp >= 1.2.0`
 - `requests`
-- `bs4`
-- `scihub`
 - `paper-search-mcp` from commit `dba2c7430aec7e17463ad981caf1d391f0204335`
 
-> Note: the `scihub` package is unmaintained and scrapes HTML that changes often,
-> so the Sci-Hub last-resort fallback may break. Open-access resolution does not
-> depend on it; set `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK=0` to run open-access only.
+> Note: the Sci-Hub last-resort fallback scrapes HTML that changes often, so it
+> may break independently of the open-access resolver. Set
+> `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK=0` to run open-access only.
 
 ## Installation
 
@@ -105,6 +104,25 @@ Or run the script directly:
 
 ```bash
 python sci_hub_server.py
+```
+
+## Running with Docker
+
+Build the image from the local checkout:
+
+```bash
+docker build -t sci-hub-mcp-server .
+```
+
+Run the MCP server over stdio, with downloads persisted to a local directory:
+
+```bash
+mkdir -p downloads
+docker run --rm -i \
+  -e SCIHUB_MCP_TOOLS=core \
+  -e SCIHUB_MCP_DOWNLOAD_DIR=/downloads \
+  -v "$PWD/downloads:/downloads" \
+  sci-hub-mcp-server
 ```
 
 ## Claude Desktop Configuration

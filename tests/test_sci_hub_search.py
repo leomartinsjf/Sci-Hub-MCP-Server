@@ -30,6 +30,45 @@ class FakeDownloadResponse:
         return self._chunks
 
 
+def test_should_read_scihub_mirrors_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        sci_hub_search.SCIHUB_MIRRORS_ENV,
+        " https://mirror-one.example/ , mirror-two.example, ftp://invalid, mirror-two.example ",
+    )
+
+    assert sci_hub_search._configured_scihub_mirrors() == (
+        "mirror-one.example",
+        "mirror-two.example",
+    )
+    assert sci_hub_search.SciHub().urls == ("mirror-one.example", "mirror-two.example")
+
+
+def test_should_extract_citation_pdf_url_and_metadata() -> None:
+    parser = sci_hub_search._SciHubPdfSourceParser()
+    parser.feed(
+        """
+        <html>
+          <head>
+            <meta name="citation_pdf_url" content="//cdn.example.org/paper.pdf">
+            <meta name="citation_title" content="Example title">
+            <meta name="citation_author" content="Ada Lovelace">
+            <meta name="citation_author" content="Grace Hopper">
+            <meta name="citation_publication_date" content="1843-01-01">
+          </head>
+          <body><iframe src="/fallback.pdf"></iframe></body>
+        </html>
+        """
+    )
+
+    assert parser.source == "//cdn.example.org/paper.pdf"
+    assert parser.normalized_metadata() == {
+        "title": "Example title",
+        "publication_date": "1843-01-01",
+        "author": "Ada Lovelace, Grace Hopper",
+        "year": "1843",
+    }
+
+
 def test_should_use_crossref_params_when_searching_by_title(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -111,6 +150,35 @@ def test_should_fall_back_to_scihub_when_no_open_access(
     assert result["status"] == "success"
     assert result["source"] == "scihub"
     assert result["is_open_access"] is False
+
+
+def test_should_use_scihub_metadata_when_crossref_metadata_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSciHubClient:
+        def fetch(self, doi: str) -> dict[str, Any]:
+            return {
+                "url": "https://sci/p.pdf",
+                "metadata": {
+                    "doi": doi,
+                    "title": "Sci-Hub title",
+                    "author": "Ada Lovelace",
+                    "year": "1843",
+                },
+            }
+
+    monkeypatch.setattr(sci_hub_search, "get_crossref_metadata_by_doi", lambda _doi: {})
+    monkeypatch.setattr(sci_hub_search, "resolve_open_access", lambda _doi: None)
+    monkeypatch.setattr(sci_hub_search, "create_scihub_instance", lambda: FakeSciHubClient())
+    monkeypatch.setenv(sci_hub_search.ENABLE_SCIHUB_FALLBACK_ENV, "1")
+
+    result = sci_hub_search.search_paper_by_doi("10.1/x")
+
+    assert result["status"] == "success"
+    assert result["source"] == "scihub"
+    assert result["title"] == "Sci-Hub title"
+    assert result["author"] == "Ada Lovelace"
+    assert result["year"] == "1843"
 
 
 def test_should_not_use_scihub_when_fallback_disabled(

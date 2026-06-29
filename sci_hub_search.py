@@ -3,19 +3,28 @@ from __future__ import annotations
 import functools
 import logging
 import os
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
-from scihub import SciHub
+import urllib3
 
 from oa_resolver import OpenAccessResult, resolve_open_access
 
 LOGGER = logging.getLogger(__name__)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CROSSREF_API_URL = "https://api.crossref.org/works"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 15
+SCIHUB_RETRY_TIMES = 3
+SCIHUB_MIRRORS = ("sci-hub.ru",)
+SCIHUB_MIRRORS_ENV = "SCIHUB_MCP_SCIHUB_MIRRORS"
+SCIHUB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0"
+}
 MAX_KEYWORD_RESULTS = 20
 DEFAULT_DOWNLOAD_DIR = "downloads"
 DOWNLOAD_DIR_ENV = "SCIHUB_MCP_DOWNLOAD_DIR"
@@ -25,12 +34,209 @@ ENABLE_SCIHUB_FALLBACK_ENV = "SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK"
 _FALSEY_VALUES = {"0", "false", "no", "off", ""}
 
 
+def _configured_scihub_mirrors() -> tuple[str, ...]:
+    configured_value = os.getenv(SCIHUB_MIRRORS_ENV, "")
+    if not configured_value.strip():
+        return SCIHUB_MIRRORS
+
+    mirrors = []
+    for raw_mirror in configured_value.split(","):
+        mirror = _normalize_scihub_mirror(raw_mirror)
+        if mirror:
+            mirrors.append(mirror)
+
+    unique_mirrors = tuple(dict.fromkeys(mirrors))
+    return unique_mirrors or SCIHUB_MIRRORS
+
+
+def _normalize_scihub_mirror(raw_mirror: str) -> str:
+    value = raw_mirror.strip().strip("/")
+    if not value:
+        return ""
+
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return parsed.netloc
+
+
+class _SciHubPdfSourceParser(HTMLParser):
+    """Extract PDF source and citation metadata from a Sci-Hub response page."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.citation_pdf_url: str | None = None
+        self.container_source: str | None = None
+        self.link_source: str | None = None
+        self.metadata: dict[str, str] = {}
+        self.authors: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        attr_map = {name.lower(): value.strip() for name, value in attrs if value}
+
+        if normalized_tag == "meta":
+            self._handle_meta_tag(attr_map)
+            return
+
+        if normalized_tag in {"iframe", "object", "embed"} and not self.container_source:
+            self.container_source = attr_map.get("src") or attr_map.get("data")
+            return
+
+        if normalized_tag == "a" and not self.link_source:
+            href = attr_map.get("href", "")
+            if ".pdf" in href.lower():
+                self.link_source = href
+
+    @property
+    def source(self) -> str | None:
+        return self.citation_pdf_url or self.container_source or self.link_source
+
+    def normalized_metadata(self) -> dict[str, str]:
+        metadata = self.metadata.copy()
+        if self.authors:
+            metadata["author"] = ", ".join(dict.fromkeys(self.authors))
+        if metadata.get("publication_date") and not metadata.get("year"):
+            metadata["year"] = _year_from_publication_date(metadata["publication_date"])
+        return metadata
+
+    def _handle_meta_tag(self, attr_map: dict[str, str]) -> None:
+        name = (attr_map.get("name") or attr_map.get("property") or "").lower()
+        content = attr_map.get("content", "")
+        if not name or not content:
+            return
+
+        if name == "citation_pdf_url" and not self.citation_pdf_url:
+            self.citation_pdf_url = content
+        elif name == "citation_doi":
+            self.metadata.setdefault("doi", content)
+        elif name == "citation_title":
+            self.metadata.setdefault("title", content)
+        elif name == "citation_author":
+            self.authors.append(content)
+        elif name == "citation_publication_date":
+            self.metadata.setdefault("publication_date", content)
+        elif name == "citation_year":
+            self.metadata.setdefault("year", content)
+
+
+@dataclass(frozen=True)
+class SciHubOpenAccessResult(OpenAccessResult):
+    """OpenAccessResult with optional metadata scraped from a Sci-Hub response."""
+
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+class SciHub:
+    """Minimal Sci-Hub client used only as the gated last-resort fallback."""
+
+    def __init__(self, mirrors: tuple[str, ...] | None = None) -> None:
+        self.session = requests.Session()
+        self.session.headers.update(SCIHUB_HEADERS)
+        self.urls = mirrors or _configured_scihub_mirrors()
+        self.current_idx = 0
+        self.tries = 0
+
+    @property
+    def base_url(self) -> str:
+        return f"https://{self.urls[self.current_idx].strip('/')}/"
+
+    def fetch(self, identifier: str, retries: int = SCIHUB_RETRY_TIMES) -> dict[str, Any]:
+        normalized_identifier = identifier.strip()
+        if not normalized_identifier:
+            raise ValueError("identifier is required")
+
+        for _attempt in range(retries):
+            self.tries += 1
+            LOGGER.info("%s Downloading with %s", self.tries, self.base_url)
+
+            try:
+                lookup = self._get_direct_url(normalized_identifier)
+                if lookup is None:
+                    self._next_url()
+                    continue
+
+                pdf_url, metadata = lookup
+                LOGGER.info("direct_url = %s", pdf_url)
+                response = self.session.get(pdf_url, verify=False)
+                if not self._is_pdf_response(response):
+                    LOGGER.error("Sci-Hub response did not contain a PDF")
+                    self._next_url()
+                    continue
+
+                return {"pdf": response.content, "url": pdf_url, "metadata": metadata}
+            except requests.exceptions.ConnectionError:
+                LOGGER.exception("%s cannot access, changing", self.urls[self.current_idx])
+                self._next_url()
+            except requests.exceptions.RequestException as exc:
+                return {"err": f"Failed to fetch {normalized_identifier}: {exc}"}
+
+        raise RuntimeError(f"Failed after {retries} retries")
+
+    def _next_url(self) -> None:
+        self.current_idx += 1
+        if self.current_idx >= len(self.urls):
+            raise RuntimeError("No more Sci-Hub mirrors available")
+
+    def _get_direct_url(self, identifier: str) -> tuple[str, dict[str, str]] | None:
+        if self._classify(identifier) == "url-direct":
+            return identifier, {}
+        return self._search_direct_url(identifier)
+
+    def _search_direct_url(self, identifier: str) -> tuple[str, dict[str, str]] | None:
+        LOGGER.debug("Pinging %s", self.base_url)
+        try:
+            ping = self.session.get(self.base_url, verify=False)
+            if ping.status_code != requests.codes.ok:
+                LOGGER.error("Server %s is down", self.base_url)
+                return None
+        except requests.exceptions.RequestException:
+            LOGGER.exception("Server %s is down", self.base_url)
+            return None
+
+        lookup_url = f"{self.base_url}{identifier}"
+        LOGGER.info("scihub url %s", lookup_url)
+        response = self.session.get(lookup_url, verify=False)
+
+        LOGGER.debug("Scraping scihub site")
+        parser = _SciHubPdfSourceParser()
+        parser.feed(response.text)
+        if not parser.source:
+            return None
+
+        return self._normalize_source_url(parser.source), parser.normalized_metadata()
+
+    def _normalize_source_url(self, source: str) -> str:
+        if source.startswith("//"):
+            return f"https:{source}"
+        if source.startswith("/"):
+            return f"https://{self.urls[self.current_idx].strip('/')}{source}"
+        return source if urlparse(source).scheme else urljoin(self.base_url, source)
+
+    def _classify(self, identifier: str) -> str:
+        parsed = urlparse(identifier)
+        if parsed.scheme in {"http", "https"}:
+            return "url-direct" if parsed.path.lower().endswith(".pdf") else "url-non-direct"
+        if identifier.isdigit():
+            return "pmid"
+        return "doi"
+
+    def _is_pdf_response(self, response: requests.Response) -> bool:
+        content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type in {
+            "application/pdf",
+            "application/octet-stream",
+        }:
+            return True
+        return response.content.startswith(b"%PDF-")
+
+
 def create_scihub_instance() -> SciHub:
     """Create a SciHub client instance with a request timeout.
 
-    The scihub package issues its main fetch without a timeout, so a hung mirror
-    would block the worker thread (and risk the whole MCP server) indefinitely.
-    Inject a default timeout on its session so the last-resort fallback fails fast.
+    A hung mirror would block the worker thread and risk the whole MCP server
+    indefinitely. Inject a default timeout on the session so the last-resort
+    fallback fails fast.
     """
     sci_hub = SciHub()
     session = getattr(sci_hub, "session", None)
@@ -68,7 +274,13 @@ def _resolve_via_scihub(doi: str) -> OpenAccessResult | None:
     pdf_url = result.get("url") if isinstance(result, dict) else None
     if not pdf_url:
         return None
-    return OpenAccessResult(source="scihub", pdf_url=pdf_url)
+
+    metadata = result.get("metadata") if isinstance(result, dict) else None
+    return SciHubOpenAccessResult(
+        source="scihub",
+        pdf_url=pdf_url,
+        metadata=metadata if isinstance(metadata, dict) else {},
+    )
 
 
 def search_paper_by_doi(doi: str, *, allow_scihub_fallback: bool = True) -> dict[str, Any]:
@@ -88,6 +300,10 @@ def search_paper_by_doi(doi: str, *, allow_scihub_fallback: bool = True) -> dict
     resolution = resolve_open_access(normalized_doi)
     if resolution is None and allow_scihub_fallback and scihub_fallback_enabled():
         resolution = _resolve_via_scihub(normalized_doi)
+
+    fallback_metadata = getattr(resolution, "metadata", {}) if resolution is not None else {}
+    if isinstance(fallback_metadata, dict):
+        metadata = _merge_metadata(metadata, fallback_metadata)
 
     if resolution is None:
         return {
@@ -290,6 +506,12 @@ def _extract_year(item: dict[str, Any]) -> str:
         if date_parts and date_parts[0]:
             return str(date_parts[0][0])
     return ""
+
+
+def _year_from_publication_date(publication_date: str) -> str:
+    normalized_date = publication_date.strip()
+    year = normalized_date[:4]
+    return year if year.isdigit() else ""
 
 
 def _normalize_result_count(num_results: int) -> int:
