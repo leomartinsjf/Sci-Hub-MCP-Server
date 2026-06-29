@@ -206,3 +206,28 @@ def test_should_reject_non_pdf_download_content(
         sci_hub_search.download_paper("https://example.org/paper.pdf", "paper.pdf")
 
     assert not (target_dir / "paper.pdf.tmp").exists()
+
+
+def test_should_inject_default_timeout_into_scihub_session() -> None:
+    class FakeSession:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def request(self, method: str, url: str, **kwargs: Any) -> str:
+            self.calls.append(kwargs)
+            return "resp"
+
+    session = FakeSession()
+    sci_hub_search._apply_default_timeout(session, 7)
+
+    session.request("GET", "http://example.org")
+    session.request("GET", "http://example.org", timeout=1)
+
+    assert session.calls[0]["timeout"] == 7
+    assert session.calls[1]["timeout"] == 1
+
+
+def test_should_wrap_scihub_session_request_with_timeout() -> None:
+    instance = sci_hub_search.create_scihub_instance()
+
+    assert hasattr(instance.session.request, "__wrapped__")

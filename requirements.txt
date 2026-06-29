@@ -1,5 +1,5 @@
 requests>=2.31.0
 bs4>=0.0.1
-mcp>=0.1.0
+mcp>=1.2.0
 scihub
 paper-search-mcp @ git+https://github.com/openags/paper-search-mcp.git@dba2c7430aec7e17463ad981caf1d391f0204335

@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
+import logging
+import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from paper_search_mcp import server as paper_search_server
 
+from oa_resolver import CONTACT_EMAIL_ENV, LEGACY_EMAIL_ENV
 from sci_hub_search import DEFAULT_DOWNLOAD_DIR, DOWNLOAD_DIR_ENV, _download_dir
 
+LOGGER = logging.getLogger(__name__)
+
 PAPER_SEARCH_MCP_COMMIT = "dba2c7430aec7e17463ad981caf1d391f0204335"
+
+# Env var selecting which upstream paper-search tools to register. Accepts "all"
+# (default), "core" (a curated minimal set for Claude), "none", or an explicit
+# comma-separated allowlist of tool names. A large tool surface degrades Claude's
+# tool-selection accuracy and consumes context, so "core" is recommended for Claude.
+TOOL_SELECTION_ENV = "SCIHUB_MCP_TOOLS"
+
+TOOL_PROFILES = {
+    "core": [
+        "search_papers",
+        "download_with_fallback",
+        "get_crossref_paper_by_doi",
+    ],
+    "none": [],
+}
 
 PAPER_SEARCH_TOOL_NAMES = [
     "search_papers",
@@ -81,10 +102,15 @@ PAPER_SEARCH_TOOL_NAMES = [
 
 
 def register_paper_search_tools(mcp: FastMCP) -> list[str]:
-    """Register paper-search-mcp tools on the local MCP server."""
-    registered_tools = []
+    """Register the selected paper-search-mcp tools on the local MCP server."""
+    _unify_contact_email()
 
-    for tool_name in PAPER_SEARCH_TOOL_NAMES:
+    # Imported here (not at module top) so _unify_contact_email runs before the
+    # upstream package reads the Unpaywall email from the environment at import time.
+    from paper_search_mcp import server as paper_search_server
+
+    registered_tools = []
+    for tool_name in _selected_tool_names():
         tool_fn = getattr(paper_search_server, tool_name, None)
         if tool_fn is None:
             continue
@@ -93,6 +119,39 @@ def register_paper_search_tools(mcp: FastMCP) -> list[str]:
         registered_tools.append(tool_name)
 
     return registered_tools
+
+
+def _selected_tool_names() -> list[str]:
+    """Resolve which upstream tool names to register from TOOL_SELECTION_ENV."""
+    raw_selection = os.getenv(TOOL_SELECTION_ENV, "").strip()
+    if not raw_selection or raw_selection.lower() == "all":
+        return list(PAPER_SEARCH_TOOL_NAMES)
+
+    if raw_selection.lower() in TOOL_PROFILES:
+        return list(TOOL_PROFILES[raw_selection.lower()])
+
+    known = set(PAPER_SEARCH_TOOL_NAMES)
+    requested = [name.strip() for name in raw_selection.split(",") if name.strip()]
+    selected = [name for name in requested if name in known]
+    unknown = [name for name in requested if name not in known]
+    if unknown:
+        LOGGER.warning("Ignoring unknown %s entries: %s", TOOL_SELECTION_ENV, ", ".join(unknown))
+    return selected
+
+
+def _unify_contact_email() -> None:
+    """Feed SCIHUB_MCP_CONTACT_EMAIL to the upstream Unpaywall connector too.
+
+    The upstream paper-search-mcp Unpaywall tool reads UNPAYWALL_EMAIL /
+    PAPER_SEARCH_MCP_UNPAYWALL_EMAIL at import time. Mirroring the contact email
+    into those names lets a single variable configure both the local resolver and
+    the integrated tools.
+    """
+    email = os.getenv(CONTACT_EMAIL_ENV) or os.getenv(LEGACY_EMAIL_ENV)
+    if not email:
+        return
+    os.environ.setdefault("UNPAYWALL_EMAIL", email)
+    os.environ.setdefault("PAPER_SEARCH_MCP_UNPAYWALL_EMAIL", email)
 
 
 def _wrap_tool(tool_fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -108,7 +167,11 @@ def _wrap_tool(tool_fn: Callable[..., Any]) -> Callable[..., Any]:
                 str(bound_args.arguments.get("save_path") or DEFAULT_DOWNLOAD_DIR),
             )
 
-        return await tool_fn(*bound_args.args, **bound_args.kwargs)
+        # Some upstream read_*_paper tools print() to stdout on error. On the stdio
+        # transport stdout IS the JSON-RPC channel, so any stray write corrupts it.
+        # Redirect stdout to stderr for the duration of the call as a boundary guard.
+        with contextlib.redirect_stdout(sys.stderr):
+            return await tool_fn(*bound_args.args, **bound_args.kwargs)
 
     wrapped_tool.__signature__ = signature
     return wrapped_tool

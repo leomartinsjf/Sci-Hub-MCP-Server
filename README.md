@@ -65,43 +65,56 @@ most effective open-access source, and is required by Unpaywall's API terms.
 ## Requirements
 
 - Python 3.10+
-- `mcp`
+- `mcp >= 1.2.0`
 - `requests`
 - `bs4`
 - `scihub`
 - `paper-search-mcp` from commit `dba2c7430aec7e17463ad981caf1d391f0204335`
 
+> Note: the `scihub` package is unmaintained and scrapes HTML that changes often,
+> so the Sci-Hub last-resort fallback may break. Open-access resolution does not
+> depend on it; set `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK=0` to run open-access only.
+
 ## Installation
 
 ```bash
-git clone https://github.com/JackKuo666/Sci-Hub-MCP-Server.git
+git clone https://github.com/leomartinsjf/Sci-Hub-MCP-Server.git
 cd Sci-Hub-MCP-Server
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
-For local development:
+`pip install -e .` reads dependencies from `pyproject.toml` and installs the
+`sci-hub-mcp` console command. The pinned requirements file also still works:
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt      # runtime only
+pip install -r requirements-dev.txt  # runtime + ruff + pytest
 ```
 
 ## Running the Server
+
+After `pip install -e .` (or `pip install .`):
+
+```bash
+sci-hub-mcp
+```
+
+Or run the script directly:
 
 ```bash
 python sci_hub_server.py
 ```
 
-You can also run it as a module from the repository root:
-
-```bash
-python -m sci_hub_server
-```
-
 ## Claude Desktop Configuration
 
 Use absolute paths for the Python executable and server script.
+
+**Recommended for Claude** — set `SCIHUB_MCP_TOOLS=core` to expose a small,
+high-signal tool set (the 5 local tools + unified search/download/metadata).
+A large tool surface degrades Claude's tool-selection accuracy and consumes
+context, so the lean profile is the better default for an assistant.
 
 macOS example:
 
@@ -112,12 +125,17 @@ macOS example:
       "command": "/absolute/path/to/Sci-Hub-MCP-Server/.venv/bin/python",
       "args": ["/absolute/path/to/Sci-Hub-MCP-Server/sci_hub_server.py"],
       "env": {
-        "SCIHUB_MCP_DOWNLOAD_DIR": "/absolute/path/to/downloads"
+        "SCIHUB_MCP_DOWNLOAD_DIR": "/absolute/path/to/downloads",
+        "SCIHUB_MCP_CONTACT_EMAIL": "you@example.com",
+        "SCIHUB_MCP_TOOLS": "core"
       }
     }
   }
 }
 ```
+
+If you installed with `pip install -e .`, you can use the console command instead
+of absolute paths (`"command": "sci-hub-mcp", "args": []`).
 
 Windows example:
 
@@ -128,12 +146,17 @@ Windows example:
       "command": "C:\\path\\to\\Sci-Hub-MCP-Server\\.venv\\Scripts\\python.exe",
       "args": ["C:\\path\\to\\Sci-Hub-MCP-Server\\sci_hub_server.py"],
       "env": {
-        "SCIHUB_MCP_DOWNLOAD_DIR": "C:\\path\\to\\downloads"
+        "SCIHUB_MCP_DOWNLOAD_DIR": "C:\\path\\to\\downloads",
+        "SCIHUB_MCP_CONTACT_EMAIL": "you@example.com",
+        "SCIHUB_MCP_TOOLS": "core"
       }
     }
   }
 }
 ```
+
+Setting `SCIHUB_MCP_CONTACT_EMAIL` configures both the local resolver and the
+integrated Unpaywall tool (it is mirrored into `UNPAYWALL_EMAIL` automatically).
 
 ## MCP Tools
 
@@ -144,6 +167,19 @@ The server exposes 62 tools by default:
 
 When IEEE and ACM API keys are configured, the upstream package defines 6 additional
 optional tools, for a maximum of 68 tools on this combined server.
+
+### Selecting which tools to expose
+
+`SCIHUB_MCP_TOOLS` controls which integrated `paper-search-mcp` tools are registered.
+The 5 local tools are always present. A large tool surface degrades Claude's
+tool-selection accuracy, so a curated set is recommended for assistant use.
+
+| Value | Effect |
+| --- | --- |
+| `all` (default) | All integrated tools (62 total). |
+| `core` | Curated minimal set: `search_papers`, `download_with_fallback`, `get_crossref_paper_by_doi` (8 tools total with the 5 local). Recommended for Claude. |
+| `none` | Only the 5 local tools. |
+| `a,b,c` | Explicit allowlist of integrated tool names; unknown names are ignored. |
 
 ### Local Tools
 

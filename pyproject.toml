@@ -1,3 +1,28 @@
+[project]
+name = "sci-hub-mcp-server"
+version = "0.2.0"
+description = "MCP server for academic paper lookup — legal open-access first, Sci-Hub as a last resort"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+  "mcp>=1.2.0",
+  "requests>=2.31.0",
+  "bs4>=0.0.1",
+  "scihub",
+  "paper-search-mcp @ git+https://github.com/openags/paper-search-mcp.git@dba2c7430aec7e17463ad981caf1d391f0204335",
+]
+
+[project.scripts]
+sci-hub-mcp = "sci_hub_server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["sci_hub_server", "sci_hub_search", "oa_resolver", "paper_search_integration"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

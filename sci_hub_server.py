@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import warnings
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -11,12 +13,25 @@ from sci_hub_search import (
     MAX_KEYWORD_RESULTS,
     download_paper,
     get_crossref_metadata_by_doi,
+    scihub_fallback_enabled,
     search_paper_by_doi,
     search_paper_by_title,
     search_papers_by_keyword,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# force=True: importing mcp/rich installs a root handler before this runs, which
+# would make a plain basicConfig() a no-op (leaving the root at WARNING and
+# dropping our INFO startup summary). force=True reclaims the root logger.
+logging.basicConfig(
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    force=True,
+)
+
+# The Sci-Hub last-resort fallback makes unverified-HTTPS requests; keep its
+# InsecureRequestWarning off stderr so server logs stay clean.
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 mcp = FastMCP("scihub")
 
@@ -133,10 +148,21 @@ async def get_paper_metadata(doi: str) -> dict[str, Any]:
 REGISTERED_PAPER_SEARCH_TOOLS = register_paper_search_tools(mcp)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry point: start the MCP server over stdio."""
+    contact_email_set = bool(os.getenv("SCIHUB_MCP_CONTACT_EMAIL") or os.getenv("UNPAYWALL_EMAIL"))
     logging.info(
-        "Starting Sci-Hub MCP Server with keyword result limit %s and %s paper-search tools",
-        MAX_KEYWORD_RESULTS,
+        "Starting Sci-Hub MCP Server | paper-search tools=%s | profile=%s | "
+        "contact_email=%s | core_api_key=%s | scihub_fallback=%s | keyword_limit=%s",
         len(REGISTERED_PAPER_SEARCH_TOOLS),
+        os.getenv("SCIHUB_MCP_TOOLS", "all"),
+        "set" if contact_email_set else "unset",
+        "set" if os.getenv("CORE_API_KEY") else "unset",
+        "on" if scihub_fallback_enabled() else "off",
+        MAX_KEYWORD_RESULTS,
     )
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

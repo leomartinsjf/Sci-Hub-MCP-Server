@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from pathlib import Path
@@ -25,8 +26,29 @@ _FALSEY_VALUES = {"0", "false", "no", "off", ""}
 
 
 def create_scihub_instance() -> SciHub:
-    """Create a SciHub client instance."""
-    return SciHub()
+    """Create a SciHub client instance with a request timeout.
+
+    The scihub package issues its main fetch without a timeout, so a hung mirror
+    would block the worker thread (and risk the whole MCP server) indefinitely.
+    Inject a default timeout on its session so the last-resort fallback fails fast.
+    """
+    sci_hub = SciHub()
+    session = getattr(sci_hub, "session", None)
+    if session is not None:
+        _apply_default_timeout(session, DEFAULT_REQUEST_TIMEOUT_SECONDS)
+    return sci_hub
+
+
+def _apply_default_timeout(session: Any, timeout: int) -> None:
+    """Make ``session.request`` default to ``timeout`` when none is supplied."""
+    original_request = session.request
+
+    @functools.wraps(original_request)
+    def request_with_timeout(method: str, url: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", timeout)
+        return original_request(method, url, **kwargs)
+
+    session.request = request_with_timeout
 
 
 def scihub_fallback_enabled() -> bool:
