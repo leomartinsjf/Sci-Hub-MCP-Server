@@ -1,161 +1,131 @@
-from typing import Any, List, Dict, Optional, Union
+from __future__ import annotations
+
 import asyncio
 import logging
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
-from sci_hub_search import search_paper_by_doi, search_paper_by_title, search_papers_by_keyword, download_paper
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from paper_search_integration import register_paper_search_tools
+from sci_hub_search import (
+    MAX_KEYWORD_RESULTS,
+    download_paper,
+    get_crossref_metadata_by_doi,
+    search_paper_by_doi,
+    search_paper_by_title,
+    search_papers_by_keyword,
+)
 
-# Initialize FastMCP server
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
 mcp = FastMCP("scihub")
 
-@mcp.tool()
-async def search_scihub_by_doi(doi: str) -> Dict[str, Any]:
-    logging.info(f"Searching for paper with DOI: {doi}")
-    """
-    Search for a paper on Sci-Hub using its DOI (Digital Object Identifier).
-
-    Args:
-        doi (str): The Digital Object Identifier of the paper, a unique alphanumeric string 
-             that identifies academic, professional, and scientific content 
-             (e.g., "10.1038/nature09492").
-
-    Returns:
-        Dict[str, Any]: Dictionary containing paper information including:
-            - title: The title of the paper
-            - author: The author(s) of the paper
-            - year: Publication year
-            - pdf_url: URL to download the PDF if available
-            - status: Success or error status
-            - error: Error message if search failed
-    """
-    try:
-        result = await asyncio.to_thread(search_paper_by_doi, doi)
-        return result
-    except Exception as e:
-        return {"error": f"An error occurred while searching by DOI: {str(e)}"}
 
 @mcp.tool()
-async def search_scihub_by_title(title: str) -> Dict[str, Any]:
-    logging.info(f"Searching for paper with title: {title}")
+async def search_scihub_by_doi(doi: str) -> dict[str, Any]:
     """
-    Search for a paper on Sci-Hub using its title.
+    Search Sci-Hub for a paper by DOI and return the resolved PDF URL when available.
 
     Args:
-        title (str): The full or partial title of the academic paper to search for.
-               More specific and complete titles will yield more accurate results.
-
-    Returns:
-        Dict[str, Any]: Dictionary containing paper information including:
-            - title: The title of the paper
-            - author: The author(s) of the paper
-            - year: Publication year
-            - pdf_url: URL to download the PDF if available
-            - status: Success or error status
-            - error: Error message if search failed
+        doi: Digital Object Identifier, for example "10.1038/nature09492".
     """
+    logging.info("Searching for paper with DOI: %s", doi)
     try:
-        result = await asyncio.to_thread(search_paper_by_title, title)
-        return result
-    except Exception as e:
-        return {"error": f"An error occurred while searching by title: {str(e)}"}
+        return await asyncio.to_thread(search_paper_by_doi, doi)
+    except Exception as exc:
+        logging.exception("DOI search failed")
+        return {"status": "error", "error": f"DOI search failed: {exc}"}
+
 
 @mcp.tool()
-async def search_scihub_by_keyword(keyword: str, num_results: int = 10) -> List[Dict[str, Any]]:
-    logging.info(f"Searching for papers with keyword: {keyword}, number of results: {num_results}")
+async def search_scihub_by_title(title: str) -> dict[str, Any]:
     """
-    Search for papers on Sci-Hub using a keyword.
+    Search CrossRef for a title, then resolve the best DOI match through Sci-Hub.
 
     Args:
-        keyword (str): The keyword or search term to use for finding relevant papers.
-                 Can be a subject, concept, or any term related to the research area.
-        num_results (int, optional): Maximum number of search results to return. 
-                      Defaults to 10. Higher values may increase search time.
-
-    Returns:
-        List[Dict[str, Any]]: A list of dictionaries, each containing information about a paper:
-            - title: The title of the paper
-            - author: The author(s) of the paper
-            - year: Publication year
-            - doi: Digital Object Identifier if available
-            - pdf_url: URL to download the PDF if available
-            - status: Success or error status
-            - error: Error message if search failed
+        title: Full or partial academic paper title.
     """
+    logging.info("Searching for paper with title: %s", title)
     try:
-        results = await asyncio.to_thread(search_papers_by_keyword, keyword, num_results)
-        return results
-    except Exception as e:
-        return [{"error": f"An error occurred while searching by keyword: {str(e)}"}]
+        return await asyncio.to_thread(search_paper_by_title, title)
+    except Exception as exc:
+        logging.exception("Title search failed")
+        return {"status": "error", "error": f"Title search failed: {exc}"}
+
+
+@mcp.tool()
+async def search_scihub_by_keyword(
+    keyword: str,
+    num_results: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    Search CrossRef by keyword and return papers that can be resolved through Sci-Hub.
+
+    Args:
+        keyword: Research keyword or phrase.
+        num_results: Requested result count. Values are clamped to 1-20.
+    """
+    logging.info(
+        "Searching for papers with keyword: %s, requested results: %s",
+        keyword,
+        num_results,
+    )
+    try:
+        return await asyncio.to_thread(search_papers_by_keyword, keyword, num_results)
+    except Exception as exc:
+        logging.exception("Keyword search failed")
+        return [{"status": "error", "error": f"Keyword search failed: {exc}"}]
+
 
 @mcp.tool()
 async def download_scihub_pdf(pdf_url: str, output_path: str) -> str:
-    logging.info(f"Attempting to download PDF from {pdf_url} to {output_path}")
     """
-    Download a paper PDF from Sci-Hub.
+    Download a PDF URL to the configured download directory.
 
     Args:
-        pdf_url (str): The URL of the PDF to download. This should be a direct link to the PDF file,
-                 typically obtained from a previous search result's 'pdf_url' field.
-        output_path (str): The file path where the downloaded PDF should be saved.
-                     Should include the filename with .pdf extension.
-
-    Returns:
-        str: A message indicating the download result:
-             - Success message with the output path if download was successful
-             - Failure message if download failed
-             - Error message with exception details if an error occurred
+        pdf_url: Direct HTTP or HTTPS URL for a PDF.
+        output_path: Relative .pdf path under SCIHUB_MCP_DOWNLOAD_DIR, or under ./downloads
+            when the environment variable is not set.
     """
+    logging.info("Attempting to download PDF from %s to %s", pdf_url, output_path)
     try:
-        success = await asyncio.to_thread(download_paper, pdf_url, output_path)
-        if success:
-            return f"PDF successfully downloaded to {output_path}"
-        else:
-            return f"Failed to download PDF to {output_path}"
-    except Exception as e:
-        return f"An error occurred while downloading PDF: {str(e)}"
+        await asyncio.to_thread(download_paper, pdf_url, output_path)
+        return f"PDF successfully downloaded to {output_path}"
+    except Exception as exc:
+        logging.exception("PDF download failed")
+        return f"PDF download failed: {exc}"
+
 
 @mcp.tool()
-async def get_paper_metadata(doi: str) -> Dict[str, Any]:
-    logging.info(f"Getting metadata for paper with DOI: {doi}")
+async def get_paper_metadata(doi: str) -> dict[str, Any]:
     """
-    Get metadata information for a paper using its DOI.
+    Get metadata for a paper DOI from CrossRef.
 
     Args:
-        doi (str): The Digital Object Identifier of the paper, a unique alphanumeric string
-             that identifies the academic paper (e.g., "10.1038/nature09492").
-
-    Returns:
-        Dict[str, Any]: Dictionary containing paper metadata including:
-            - doi: The DOI of the paper
-            - title: The title of the paper
-            - author: The author(s) of the paper
-            - year: Publication year
-            - pdf_url: URL to download the PDF if available
-            - status: Success or error status
-            - error: Error message if retrieval failed
+        doi: Digital Object Identifier, for example "10.1038/nature09492".
     """
+    logging.info("Getting metadata for paper with DOI: %s", doi)
     try:
-        # First search for the paper by DOI
-        paper_info = await asyncio.to_thread(search_paper_by_doi, doi)
-        
-        if paper_info.get('status') == 'success':
-            # Extract and return metadata
-            return {
-                'doi': doi,
-                'title': paper_info.get('title', ''),
-                'author': paper_info.get('author', ''),
-                'year': paper_info.get('year', ''),
-                'pdf_url': paper_info.get('pdf_url', ''),
-                'status': 'success'
-            }
-        else:
-            return {"error": f"Could not find metadata for paper with DOI {doi}"}
-    except Exception as e:
-        return {"error": f"An error occurred while getting metadata: {str(e)}"}
+        metadata = await asyncio.to_thread(get_crossref_metadata_by_doi, doi)
+    except Exception as exc:
+        logging.exception("Metadata lookup failed")
+        return {"status": "error", "error": f"Metadata lookup failed: {exc}"}
+
+    if not metadata:
+        return {"doi": doi, "status": "not_found"}
+
+    metadata["status"] = "success"
+    metadata["doi"] = metadata.get("doi") or doi
+    return metadata
+
+
+REGISTERED_PAPER_SEARCH_TOOLS = register_paper_search_tools(mcp)
+
 
 if __name__ == "__main__":
-    logging.info("Starting Sci-Hub MCP Server")
-    # Initialize and run the server
-    mcp.run(transport='stdio')
+    logging.info(
+        "Starting Sci-Hub MCP Server with keyword result limit %s and %s paper-search tools",
+        MAX_KEYWORD_RESULTS,
+        len(REGISTERED_PAPER_SEARCH_TOOLS),
+    )
+    mcp.run(transport="stdio")
