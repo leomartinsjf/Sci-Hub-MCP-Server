@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 import requests
 from scihub import SciHub
 
+from oa_resolver import OpenAccessResult, resolve_open_access
+
 LOGGER = logging.getLogger(__name__)
 
 CROSSREF_API_URL = "https://api.crossref.org/works"
@@ -18,6 +20,8 @@ DEFAULT_DOWNLOAD_DIR = "downloads"
 DOWNLOAD_DIR_ENV = "SCIHUB_MCP_DOWNLOAD_DIR"
 MAX_DOWNLOAD_BYTES_ENV = "SCIHUB_MCP_MAX_DOWNLOAD_BYTES"
 DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+ENABLE_SCIHUB_FALLBACK_ENV = "SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK"
+_FALSEY_VALUES = {"0", "false", "no", "off", ""}
 
 
 def create_scihub_instance() -> SciHub:
@@ -25,28 +29,62 @@ def create_scihub_instance() -> SciHub:
     return SciHub()
 
 
-def search_paper_by_doi(doi: str) -> dict[str, Any]:
-    """Search Sci-Hub by DOI and return the resolved PDF URL when available."""
+def scihub_fallback_enabled() -> bool:
+    """Whether the Sci-Hub last-resort fallback is enabled (default: enabled)."""
+    return os.getenv(ENABLE_SCIHUB_FALLBACK_ENV, "1").strip().lower() not in _FALSEY_VALUES
+
+
+def _resolve_via_scihub(doi: str) -> OpenAccessResult | None:
+    """Last-resort Sci-Hub lookup, used only when no open-access copy is found."""
+    sci_hub = create_scihub_instance()
+    try:
+        result = sci_hub.fetch(doi)
+    except Exception:
+        LOGGER.exception("Sci-Hub fallback failed")
+        return None
+
+    pdf_url = result.get("url") if isinstance(result, dict) else None
+    if not pdf_url:
+        return None
+    return OpenAccessResult(source="scihub", pdf_url=pdf_url)
+
+
+def search_paper_by_doi(doi: str, *, allow_scihub_fallback: bool = True) -> dict[str, Any]:
+    """Resolve a DOI to a full-text URL, preferring legal open-access sources.
+
+    The open-access provider chain (see ``oa_resolver``) runs first. Sci-Hub is
+    consulted only as a last resort: when no open-access copy is found and the
+    fallback is both requested by the caller and enabled through
+    ``SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK`` (enabled by default).
+    """
     normalized_doi = doi.strip()
     if not normalized_doi:
         return {"doi": doi, "status": "not_found", "error": "DOI is required"}
 
-    sh = create_scihub_instance()
-    try:
-        result = sh.fetch(normalized_doi)
-    except Exception:
-        LOGGER.exception("Sci-Hub DOI search failed")
-        return {"doi": normalized_doi, "status": "not_found"}
-
-    pdf_url = result.get("url") if isinstance(result, dict) else None
-    if not pdf_url:
-        return {"doi": normalized_doi, "status": "not_found"}
-
     metadata = get_crossref_metadata_by_doi(normalized_doi)
+
+    resolution = resolve_open_access(normalized_doi)
+    if resolution is None and allow_scihub_fallback and scihub_fallback_enabled():
+        resolution = _resolve_via_scihub(normalized_doi)
+
+    if resolution is None:
+        return {
+            "doi": normalized_doi,
+            "status": "not_found",
+            "title": metadata.get("title", ""),
+            "author": metadata.get("author", ""),
+            "year": metadata.get("year", ""),
+        }
+
     return {
         "doi": normalized_doi,
-        "pdf_url": pdf_url,
+        "pdf_url": resolution.best_url,
+        "landing_url": resolution.landing_url,
         "status": "success",
+        "source": resolution.source,
+        "oa_status": resolution.oa_status,
+        "license": resolution.license,
+        "is_open_access": resolution.source != "scihub",
         "title": metadata.get("title", ""),
         "author": metadata.get("author", ""),
         "year": metadata.get("year", ""),
@@ -73,7 +111,11 @@ def search_paper_by_title(title: str) -> dict[str, Any]:
 
 
 def search_papers_by_keyword(keyword: str, num_results: int = 10) -> list[dict[str, Any]]:
-    """Search CrossRef by keyword and return Sci-Hub-resolvable papers."""
+    """Search CrossRef by keyword and return papers with an open-access copy.
+
+    Bulk keyword resolution runs open-access providers only; the Sci-Hub
+    fallback is intentionally disabled here to avoid automated bulk scraping.
+    """
     normalized_keyword = keyword.strip()
     if not normalized_keyword:
         return []
@@ -88,7 +130,7 @@ def search_papers_by_keyword(keyword: str, num_results: int = 10) -> list[dict[s
         if not doi:
             continue
 
-        result = search_paper_by_doi(doi)
+        result = search_paper_by_doi(doi, allow_scihub_fallback=False)
         if result.get("status") == "success":
             papers.append(_merge_metadata(result, _metadata_from_crossref_item(item)))
 

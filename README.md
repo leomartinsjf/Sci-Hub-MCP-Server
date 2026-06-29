@@ -3,23 +3,64 @@
 [![smithery badge](https://smithery.ai/badge/@JackKuo666/sci-hub-mcp-server)](https://smithery.ai/server/@JackKuo666/sci-hub-mcp-server)
 
 Sci-Hub MCP Server exposes a Model Context Protocol interface for looking up academic
-papers by DOI, title, keyword, and multiple academic repositories. It keeps the original
-Sci-Hub-oriented tools and also registers the public tool surface from
-`openags/paper-search-mcp`.
+papers by DOI, title, keyword, and across many academic repositories.
+
+The DOI, title, and keyword tools resolve full text through a chain of **legal
+open-access providers first** — arXiv, Unpaywall, OpenAlex, Europe PMC, DOAJ, and CORE
+(when an API key is configured). **Sci-Hub is consulted only as a last resort**, when no
+open-access copy is found and the fallback is enabled. The server also registers the
+public tool surface from `openags/paper-search-mcp`.
 
 Use this project only where you have the legal right to access and download the content.
 
 ## Features
 
-- Search by DOI and return a resolved PDF URL when available.
-- Search by title through CrossRef, then resolve the best DOI match.
-- Search by keyword through CrossRef with a maximum of 20 requested results.
-- Retrieve DOI metadata from CrossRef without requiring a Sci-Hub download.
+- Resolve a DOI to a full-text URL through legal open-access providers first
+  (arXiv → Unpaywall → OpenAlex → Europe PMC → DOAJ → CORE), with Sci-Hub as a
+  configurable last-resort fallback.
+- Search by title through CrossRef, then resolve the best DOI match the same way.
+- Search by keyword through CrossRef (maximum 20 results). Keyword resolution is
+  open-access-only — the Sci-Hub fallback is disabled for bulk search to avoid
+  automated scraping.
+- Responses report provenance: `source`, `oa_status`, `license`, `landing_url`, and
+  `is_open_access`, so callers can see exactly where a URL came from.
+- Retrieve DOI metadata from CrossRef without requiring a download.
 - Download direct PDF URLs into a restricted local download directory.
 - Search, download, and read papers through integrated `paper-search-mcp` connectors.
 - Unified multi-source search across arXiv, PubMed, bioRxiv, medRxiv, CrossRef,
   OpenAlex, PMC, CORE, Europe PMC, dblp, OpenAIRE, CiteSeerX, DOAJ, BASE, Zenodo,
   HAL, SSRN, Unpaywall, and other configured sources.
+
+## Open-Access Resolution
+
+`search_scihub_by_doi`, `search_scihub_by_title`, and `search_scihub_by_keyword` resolve
+a DOI by trying these providers in order and returning the first hit (see
+[`oa_resolver.py`](oa_resolver.py)):
+
+| Order | Provider | Notes |
+| --- | --- | --- |
+| 1 | arXiv | Zero-network shortcut for arXiv-minted DOIs (`10.48550/arXiv.*`). |
+| 2 | Unpaywall | Authoritative OA aggregator. Requires a contact email. |
+| 3 | OpenAlex | Second aggregator; catches what Unpaywall misses. |
+| 4 | Europe PMC | Strong for biomedical full text and PMC open-access renders. |
+| 5 | DOAJ | Full text from vetted fully open-access journals. |
+| 6 | CORE | Repository aggregator; runs only when `CORE_API_KEY` is set. |
+| last | Sci-Hub | Last resort only, gated by `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK`. |
+
+CrossRef is used for metadata and DOI resolution, not as an open-access PDF source: its
+text-mining links are frequently paywalled and are not reliable open-access signals.
+
+### Resolution configuration
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SCIHUB_MCP_CONTACT_EMAIL` | Contact email for Unpaywall (required by its terms) and the OpenAlex polite pool. Without it, Unpaywall is skipped. `UNPAYWALL_EMAIL` is accepted as a fallback name. | unset |
+| `SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK` | Enable the Sci-Hub last-resort fallback. Set to `0`/`false`/`no`/`off` to disable. | `1` (enabled) |
+| `SCIHUB_MCP_OA_PROVIDERS` | Comma-separated provider order/subset override, e.g. `unpaywall,openalex`. Unknown names are ignored. | full default order |
+| `CORE_API_KEY` | Enables the CORE provider when set. | unset |
+
+Set `SCIHUB_MCP_CONTACT_EMAIL` to a real address — it unlocks Unpaywall, the single
+most effective open-access source, and is required by Unpaywall's API terms.
 
 ## Requirements
 
@@ -108,9 +149,9 @@ optional tools, for a maximum of 68 tools on this combined server.
 
 | Tool | Purpose |
 | --- | --- |
-| `search_scihub_by_doi` | Search Sci-Hub by DOI. |
-| `search_scihub_by_title` | Search CrossRef by title and resolve the DOI on Sci-Hub. |
-| `search_scihub_by_keyword` | Search CrossRef by keyword and resolve matching DOIs on Sci-Hub. |
+| `search_scihub_by_doi` | Resolve a DOI to a full-text URL, open-access first, Sci-Hub last resort. |
+| `search_scihub_by_title` | Resolve a title via CrossRef, then the same open-access-first chain. |
+| `search_scihub_by_keyword` | Find keyword matches via CrossRef that have an open-access full text (no Sci-Hub fallback). |
 | `download_scihub_pdf` | Download a direct PDF URL into the configured download directory. |
 | `get_paper_metadata` | Get CrossRef metadata for a DOI. |
 

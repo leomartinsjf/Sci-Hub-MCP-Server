@@ -24,7 +24,12 @@ mcp = FastMCP("scihub")
 @mcp.tool()
 async def search_scihub_by_doi(doi: str) -> dict[str, Any]:
     """
-    Search Sci-Hub for a paper by DOI and return the resolved PDF URL when available.
+    Resolve a paper by DOI to a full-text URL, preferring legal open-access sources.
+
+    Tries open-access providers first (arXiv, Unpaywall, OpenAlex, Europe PMC, DOAJ,
+    and CORE when configured). Sci-Hub is used only as a last resort, when no
+    open-access copy is found and SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK is enabled.
+    The "source" field in the response reports where the URL came from.
 
     Args:
         doi: Digital Object Identifier, for example "10.1038/nature09492".
@@ -40,7 +45,10 @@ async def search_scihub_by_doi(doi: str) -> dict[str, Any]:
 @mcp.tool()
 async def search_scihub_by_title(title: str) -> dict[str, Any]:
     """
-    Search CrossRef for a title, then resolve the best DOI match through Sci-Hub.
+    Search CrossRef for a title, then resolve the best DOI match to a full-text URL.
+
+    Resolution prefers legal open-access sources and falls back to Sci-Hub only as a
+    last resort (see search_scihub_by_doi).
 
     Args:
         title: Full or partial academic paper title.
@@ -59,7 +67,10 @@ async def search_scihub_by_keyword(
     num_results: int = 10,
 ) -> list[dict[str, Any]]:
     """
-    Search CrossRef by keyword and return papers that can be resolved through Sci-Hub.
+    Search CrossRef by keyword and return papers that have an open-access full text.
+
+    Bulk keyword resolution uses open-access providers only; the Sci-Hub fallback is
+    disabled here to avoid automated bulk scraping.
 
     Args:
         keyword: Research keyword or phrase.

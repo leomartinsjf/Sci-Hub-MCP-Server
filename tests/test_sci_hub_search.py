@@ -5,6 +5,11 @@ from typing import Any
 import pytest
 
 import sci_hub_search
+from oa_resolver import OpenAccessResult
+
+
+def _fail_scihub(_doi: str) -> OpenAccessResult | None:
+    raise AssertionError("Sci-Hub fallback must not run here")
 
 
 class FakeDownloadResponse:
@@ -63,6 +68,84 @@ def test_should_use_crossref_params_when_searching_by_title(
         "author": "Ada Lovelace",
         "year": "1843",
     }
+
+
+def test_should_prefer_open_access_over_scihub(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sci_hub_search,
+        "get_crossref_metadata_by_doi",
+        lambda _doi: {"title": "T", "author": "A", "year": "2020"},
+    )
+    monkeypatch.setattr(
+        sci_hub_search,
+        "resolve_open_access",
+        lambda _doi: OpenAccessResult(
+            source="unpaywall", pdf_url="https://oa/p.pdf", oa_status="gold", license="cc-by"
+        ),
+    )
+    monkeypatch.setattr(sci_hub_search, "_resolve_via_scihub", _fail_scihub)
+
+    result = sci_hub_search.search_paper_by_doi("10.1/x")
+
+    assert result["status"] == "success"
+    assert result["source"] == "unpaywall"
+    assert result["pdf_url"] == "https://oa/p.pdf"
+    assert result["is_open_access"] is True
+    assert result["title"] == "T"
+
+
+def test_should_fall_back_to_scihub_when_no_open_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sci_hub_search, "get_crossref_metadata_by_doi", lambda _doi: {})
+    monkeypatch.setattr(sci_hub_search, "resolve_open_access", lambda _doi: None)
+    monkeypatch.setattr(
+        sci_hub_search,
+        "_resolve_via_scihub",
+        lambda _doi: OpenAccessResult(source="scihub", pdf_url="https://sci/p.pdf"),
+    )
+    monkeypatch.setenv(sci_hub_search.ENABLE_SCIHUB_FALLBACK_ENV, "1")
+
+    result = sci_hub_search.search_paper_by_doi("10.1/x")
+
+    assert result["status"] == "success"
+    assert result["source"] == "scihub"
+    assert result["is_open_access"] is False
+
+
+def test_should_not_use_scihub_when_fallback_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sci_hub_search, "get_crossref_metadata_by_doi", lambda _doi: {})
+    monkeypatch.setattr(sci_hub_search, "resolve_open_access", lambda _doi: None)
+    monkeypatch.setattr(sci_hub_search, "_resolve_via_scihub", _fail_scihub)
+    monkeypatch.setenv(sci_hub_search.ENABLE_SCIHUB_FALLBACK_ENV, "0")
+
+    result = sci_hub_search.search_paper_by_doi("10.1/x")
+
+    assert result["status"] == "not_found"
+
+
+def test_should_disable_scihub_fallback_for_keyword_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_doi_search(doi: str, *, allow_scihub_fallback: bool = True) -> dict[str, Any]:
+        captured["allow_scihub_fallback"] = allow_scihub_fallback
+        return {"status": "success", "doi": doi, "pdf_url": "u", "source": "unpaywall"}
+
+    monkeypatch.setattr(
+        sci_hub_search,
+        "_request_crossref",
+        lambda _params: {"message": {"items": [{"DOI": "10.1/x", "title": ["T"]}]}},
+    )
+    monkeypatch.setattr(sci_hub_search, "search_paper_by_doi", fake_doi_search)
+
+    papers = sci_hub_search.search_papers_by_keyword("ai", 1)
+
+    assert captured["allow_scihub_fallback"] is False
+    assert len(papers) == 1
 
 
 def test_should_clamp_keyword_result_count(monkeypatch: pytest.MonkeyPatch) -> None:
