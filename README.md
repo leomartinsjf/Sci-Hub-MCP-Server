@@ -106,6 +106,27 @@ Or run the script directly:
 python sci_hub_server.py
 ```
 
+By default, the server runs over `stdio` for local MCP clients. To expose it for
+remote MCP clients behind HTTPS:
+
+```bash
+sci-hub-mcp --transport streamable-http --host 127.0.0.1 --port 8000 --streamable-http-path /mcp
+```
+
+Supported runtime settings:
+
+| CLI option | Environment variable | Default |
+| --- | --- | --- |
+| `--transport` | `MCP_TRANSPORT` | `stdio` |
+| `--host` | `MCP_HOST` | `127.0.0.1` |
+| `--port` | `MCP_PORT` | `8000` |
+| `--streamable-http-path` | `MCP_STREAMABLE_HTTP_PATH` | `/mcp` |
+| `--sse-path` | `MCP_SSE_PATH` | `/sse` |
+| `--message-path` | `MCP_MESSAGE_PATH` | `/messages/` |
+| `--mount-path` | `MCP_MOUNT_PATH` | `/` |
+| `--allowed-host` | `MCP_ALLOWED_HOSTS` | localhost/loopback hosts |
+| `--allowed-origin` | `MCP_ALLOWED_ORIGINS` | localhost/loopback origins |
+
 ## Running with Docker
 
 Build the image from the local checkout:
@@ -125,7 +146,28 @@ docker run --rm -i \
   sci-hub-mcp-server
 ```
 
+Run the container over HTTP for a TLS reverse proxy:
+
+```bash
+docker run --rm \
+  -p 8000:8000 \
+  -e SCIHUB_MCP_TOOLS=core \
+  -e SCIHUB_MCP_DOWNLOAD_DIR=/downloads \
+  -v "$PWD/downloads:/downloads" \
+  sci-hub-mcp-server \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --streamable-http-path /mcp \
+  --allowed-host your-domain.example
+```
+
+Put HTTPS in front of `/mcp` before registering it as a Claude remote connector.
+
 ## Claude Desktop Configuration
+
+See [`docs/claude.md`](docs/claude.md) for Claude Code, local Claude Desktop-style
+clients, Docker, and Claude remote connector setup.
 
 Use absolute paths for the Python executable and server script.
 

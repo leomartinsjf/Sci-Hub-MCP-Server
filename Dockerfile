@@ -18,4 +18,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 RUN mkdir -p /downloads
 
-CMD ["sci-hub-mcp"]
+EXPOSE 8000
+
+ENTRYPOINT ["sci-hub-mcp"]
+CMD ["--transport", "stdio"]

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "scihub": {
+      "type": "stdio",
+      "command": ".venv/bin/python",
+      "args": [
+        "sci_hub_server.py",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "SCIHUB_MCP_TOOLS": "core",
+        "SCIHUB_MCP_DOWNLOAD_DIR": "downloads"
+      },
+      "timeout": 600000
+    }
+  }
+}
