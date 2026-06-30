@@ -8,6 +8,8 @@ import warnings
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from typing_extensions import TypedDict
 
 from paper_search_integration import register_paper_search_tools
 from sci_hub_search import (
@@ -43,11 +45,116 @@ DEFAULT_MESSAGE_PATH = "/messages/"
 DEFAULT_MOUNT_PATH = "/"
 DEFAULT_ALLOWED_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
 DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
+LOCAL_TOOL_SELECTION_ENV = "SCIHUB_MCP_LOCAL_TOOLS"
+DEFAULT_STANDARD_SEARCH_LIMIT = 5
+
+READ_ONLY_REMOTE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+DOWNLOAD_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=True,
+)
 
 mcp = FastMCP("scihub")
 
 
-@mcp.tool()
+class StandardSearchResult(TypedDict):
+    id: str
+    title: str
+    url: str
+
+
+class StandardSearchPayload(TypedDict):
+    results: list[StandardSearchResult]
+
+
+class StandardFetchPayload(TypedDict):
+    id: str
+    title: str
+    text: str
+    url: str
+    metadata: dict[str, Any]
+
+
+async def search(query: str) -> StandardSearchPayload:
+    """
+    Search for open-access academic papers and return ChatGPT-compatible results.
+
+    Use this when a ChatGPT or Codex client needs a read-only knowledge lookup.
+    FastMCP exposes this as structured content and JSON text content. Each result
+    has `id`, `title`, and `url`; pass `id` to `fetch` for details.
+
+    Args:
+        query: Research keyword, title fragment, DOI, or phrase.
+    """
+    logging.info("Running standard search for query: %s", query)
+    try:
+        papers = await asyncio.to_thread(
+            search_papers_by_keyword,
+            query,
+            DEFAULT_STANDARD_SEARCH_LIMIT,
+        )
+    except Exception as exc:
+        logging.exception("Standard search failed")
+        logging.debug("Search error detail: %s", exc)
+        return {"results": []}
+
+    return {
+        "results": [
+            search_result
+            for paper in papers
+            if (search_result := _to_standard_search_result(paper)) is not None
+        ]
+    }
+
+
+async def fetch(id: str) -> StandardFetchPayload:
+    """
+    Fetch one open-access paper record by DOI and return ChatGPT-compatible text.
+
+    Use this after `search`, passing the search result `id`. The resolver remains
+    open-access-only here; Sci-Hub fallback is disabled for the standard ChatGPT
+    data-app surface.
+
+    Args:
+        id: Paper identifier from `search`, normally a DOI.
+    """
+    logging.info("Running standard fetch for id: %s", id)
+    identifier = id.strip()
+    if not identifier:
+        return {
+            "id": id,
+            "title": "",
+            "text": "No paper id was provided.",
+            "url": "",
+            "metadata": {"status": "not_found"},
+        }
+
+    try:
+        paper = await asyncio.to_thread(
+            search_paper_by_doi,
+            identifier,
+            allow_scihub_fallback=False,
+        )
+    except Exception as exc:
+        logging.exception("Standard fetch failed")
+        return {
+            "id": identifier,
+            "title": identifier,
+            "text": f"Fetch failed: {exc}",
+            "url": _doi_url(identifier),
+            "metadata": {"status": "error"},
+        }
+
+    return _to_standard_fetch_payload(identifier, paper)
+
+
 async def search_scihub_by_doi(doi: str) -> dict[str, Any]:
     """
     Resolve a paper by DOI to a full-text URL, preferring legal open-access sources.
@@ -68,7 +175,6 @@ async def search_scihub_by_doi(doi: str) -> dict[str, Any]:
         return {"status": "error", "error": f"DOI search failed: {exc}"}
 
 
-@mcp.tool()
 async def search_scihub_by_title(title: str) -> dict[str, Any]:
     """
     Search CrossRef for a title, then resolve the best DOI match to a full-text URL.
@@ -87,7 +193,6 @@ async def search_scihub_by_title(title: str) -> dict[str, Any]:
         return {"status": "error", "error": f"Title search failed: {exc}"}
 
 
-@mcp.tool()
 async def search_scihub_by_keyword(
     keyword: str,
     num_results: int = 10,
@@ -114,7 +219,6 @@ async def search_scihub_by_keyword(
         return [{"status": "error", "error": f"Keyword search failed: {exc}"}]
 
 
-@mcp.tool()
 async def download_scihub_pdf(pdf_url: str, output_path: str) -> str:
     """
     Download a PDF URL to the configured download directory.
@@ -133,7 +237,6 @@ async def download_scihub_pdf(pdf_url: str, output_path: str) -> str:
         return f"PDF download failed: {exc}"
 
 
-@mcp.tool()
 async def get_paper_metadata(doi: str) -> dict[str, Any]:
     """
     Get metadata for a paper DOI from CrossRef.
@@ -156,6 +259,140 @@ async def get_paper_metadata(doi: str) -> dict[str, Any]:
     return metadata
 
 
+LOCAL_TOOL_REGISTRY = {
+    "search": (search, READ_ONLY_REMOTE_ANNOTATIONS),
+    "fetch": (fetch, READ_ONLY_REMOTE_ANNOTATIONS),
+    "search_scihub_by_doi": (search_scihub_by_doi, READ_ONLY_REMOTE_ANNOTATIONS),
+    "search_scihub_by_title": (search_scihub_by_title, READ_ONLY_REMOTE_ANNOTATIONS),
+    "search_scihub_by_keyword": (search_scihub_by_keyword, READ_ONLY_REMOTE_ANNOTATIONS),
+    "download_scihub_pdf": (download_scihub_pdf, DOWNLOAD_TOOL_ANNOTATIONS),
+    "get_paper_metadata": (get_paper_metadata, READ_ONLY_REMOTE_ANNOTATIONS),
+}
+LOCAL_TOOL_PROFILES = {
+    "all": list(LOCAL_TOOL_REGISTRY),
+    "chatgpt": ["search", "fetch"],
+    "standard": ["search", "fetch"],
+    "none": [],
+}
+
+
+def register_local_tools(server: FastMCP) -> list[str]:
+    """Register local tools selected by SCIHUB_MCP_LOCAL_TOOLS."""
+    registered_tools = []
+    for tool_name in _selected_local_tool_names():
+        tool_config = LOCAL_TOOL_REGISTRY.get(tool_name)
+        if tool_config is None:
+            continue
+
+        tool_fn, annotations = tool_config
+        server.add_tool(
+            tool_fn,
+            name=tool_name,
+            annotations=annotations,
+            structured_output=tool_name in {"search", "fetch"},
+        )
+        registered_tools.append(tool_name)
+
+    return registered_tools
+
+
+def _selected_local_tool_names() -> list[str]:
+    """Resolve local tools from SCIHUB_MCP_LOCAL_TOOLS."""
+    raw_selection = os.getenv(LOCAL_TOOL_SELECTION_ENV, "all").strip()
+    if not raw_selection:
+        raw_selection = "all"
+
+    normalized_selection = raw_selection.lower()
+    if normalized_selection in LOCAL_TOOL_PROFILES:
+        return list(LOCAL_TOOL_PROFILES[normalized_selection])
+
+    known = set(LOCAL_TOOL_REGISTRY)
+    requested = [name.strip() for name in raw_selection.split(",") if name.strip()]
+    selected = [name for name in requested if name in known]
+    unknown = [name for name in requested if name not in known]
+    if unknown:
+        logging.warning(
+            "Ignoring unknown %s entries: %s",
+            LOCAL_TOOL_SELECTION_ENV,
+            ", ".join(unknown),
+        )
+    return selected
+
+
+def _to_standard_search_result(paper: dict[str, Any]) -> StandardSearchResult | None:
+    paper_id = str(paper.get("doi") or "").strip()
+    if not paper_id:
+        return None
+
+    title = str(paper.get("title") or paper_id).strip()
+    return {
+        "id": paper_id,
+        "title": title or paper_id,
+        "url": _citation_url(paper, paper_id),
+    }
+
+
+def _to_standard_fetch_payload(identifier: str, paper: dict[str, Any]) -> StandardFetchPayload:
+    paper_id = str(paper.get("doi") or identifier).strip()
+    title = str(paper.get("title") or paper_id).strip()
+    metadata = {
+        key: value
+        for key, value in {
+            "doi": paper_id,
+            "author": paper.get("author"),
+            "year": paper.get("year"),
+            "source": paper.get("source"),
+            "oa_status": paper.get("oa_status"),
+            "license": paper.get("license"),
+            "is_open_access": paper.get("is_open_access"),
+            "status": paper.get("status"),
+        }.items()
+        if value not in {None, ""}
+    }
+
+    if paper.get("status") == "success":
+        text_parts = [
+            f"Title: {title}",
+            f"DOI: {paper_id}",
+            f"Source: {paper.get('source', 'open-access')}",
+        ]
+        if paper.get("author"):
+            text_parts.append(f"Authors: {paper['author']}")
+        if paper.get("year"):
+            text_parts.append(f"Year: {paper['year']}")
+        if paper.get("pdf_url"):
+            text_parts.append(f"Open-access PDF: {paper['pdf_url']}")
+        if paper.get("landing_url"):
+            text_parts.append(f"Landing page: {paper['landing_url']}")
+    else:
+        text_parts = [
+            f"Title: {title}",
+            f"DOI: {paper_id}",
+            "No open-access full text was found by the OA-first resolver.",
+        ]
+
+    return {
+        "id": paper_id,
+        "title": title,
+        "text": "\n".join(text_parts),
+        "url": _citation_url(paper, paper_id),
+        "metadata": metadata,
+    }
+
+
+def _citation_url(paper: dict[str, Any], paper_id: str) -> str:
+    for key in ("landing_url", "pdf_url"):
+        value = str(paper.get(key) or "").strip()
+        if value:
+            return value
+    return _doi_url(paper_id)
+
+
+def _doi_url(doi: str) -> str:
+    return f"https://doi.org/{doi.strip()}" if doi.strip() else ""
+
+
+REGISTERED_LOCAL_TOOLS = register_local_tools(mcp)
 REGISTERED_PAPER_SEARCH_TOOLS = register_paper_search_tools(mcp)
 
 
@@ -167,8 +404,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("stdio", "sse", "streamable-http"),
         default=os.getenv("MCP_TRANSPORT", DEFAULT_TRANSPORT),
         help=(
-            "MCP transport to run. Use stdio for Claude Code and streamable-http "
-            "for Claude remote connectors."
+            "MCP transport to run. Use stdio for local MCP clients and "
+            "streamable-http for remote MCP clients."
         ),
     )
     parser.add_argument(
@@ -273,9 +510,12 @@ def main(argv: list[str] | None = None) -> None:
     configure_server(args)
     contact_email_set = bool(os.getenv("SCIHUB_MCP_CONTACT_EMAIL") or os.getenv("UNPAYWALL_EMAIL"))
     logging.info(
-        "Starting Sci-Hub MCP Server | paper-search tools=%s | profile=%s | "
+        "Starting Sci-Hub MCP Server | local tools=%s | local_profile=%s | "
+        "paper-search tools=%s | profile=%s | "
         "contact_email=%s | core_api_key=%s | scihub_fallback=%s | keyword_limit=%s | "
         "transport=%s | host=%s | port=%s | streamable_http_path=%s | allowed_hosts=%s",
+        len(REGISTERED_LOCAL_TOOLS),
+        os.getenv(LOCAL_TOOL_SELECTION_ENV, "all"),
         len(REGISTERED_PAPER_SEARCH_TOOLS),
         os.getenv("SCIHUB_MCP_TOOLS", "all"),
         "set" if contact_email_set else "unset",

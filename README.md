@@ -26,6 +26,8 @@ Use this project only where you have the legal right to access and download the 
   `is_open_access`, so callers can see exactly where a URL came from.
 - Retrieve DOI metadata from CrossRef without requiring a download.
 - Download direct PDF URLs into a restricted local download directory.
+- Expose ChatGPT/Codex-compatible `search` and `fetch` tools for read-only
+  data-app and company-knowledge style clients.
 - Search, download, and read papers through integrated `paper-search-mcp` connectors.
 - Unified multi-source search across arXiv, PubMed, bioRxiv, medRxiv, CrossRef,
   OpenAlex, PMC, CORE, Europe PMC, dblp, OpenAIRE, CiteSeerX, DOAJ, BASE, Zenodo,
@@ -162,7 +164,23 @@ docker run --rm \
   --allowed-host your-domain.example
 ```
 
-Put HTTPS in front of `/mcp` before registering it as a Claude remote connector.
+Put HTTPS in front of `/mcp` before registering it as a remote MCP endpoint.
+
+## Codex, ChatGPT, and Claude
+
+- Codex setup: [`docs/codex.md`](docs/codex.md)
+- ChatGPT tool-only app setup: [`docs/chatgpt.md`](docs/chatgpt.md)
+- Claude setup: [`docs/claude.md`](docs/claude.md)
+
+For ChatGPT, use the read-only profile:
+
+```bash
+SCIHUB_MCP_LOCAL_TOOLS=chatgpt
+SCIHUB_MCP_TOOLS=chatgpt
+SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK=0
+```
+
+That exposes only `search` and `fetch`.
 
 ## Claude Desktop Configuration
 
@@ -172,7 +190,7 @@ clients, Docker, and Claude remote connector setup.
 Use absolute paths for the Python executable and server script.
 
 **Recommended for Claude** — set `SCIHUB_MCP_TOOLS=core` to expose a small,
-high-signal tool set (the 5 local tools + unified search/download/metadata).
+high-signal tool set (the local tools + unified search/download/metadata).
 A large tool surface degrades Claude's tool-selection accuracy and consumes
 context, so the lean profile is the better default for an assistant.
 
@@ -220,31 +238,49 @@ integrated Unpaywall tool (it is mirrored into `UNPAYWALL_EMAIL` automatically).
 
 ## MCP Tools
 
-The server exposes 62 tools by default:
+The server exposes 64 tools by default:
 
-- 5 local Sci-Hub/CrossRef tools.
+- 7 local tools, including standard `search` and `fetch`.
 - 57 integrated `paper-search-mcp` tools.
 
-When IEEE and ACM API keys are configured, the upstream package defines 6 additional
-optional tools, for a maximum of 68 tools on this combined server.
+When IEEE and ACM API keys are configured, the upstream package can expose 6 additional
+optional tools, for a maximum of 70 tools on this combined server. Some integrated
+tools also require source availability at call time.
 
 ### Selecting which tools to expose
 
-`SCIHUB_MCP_TOOLS` controls which integrated `paper-search-mcp` tools are registered.
-The 5 local tools are always present. A large tool surface degrades Claude's
-tool-selection accuracy, so a curated set is recommended for assistant use.
+Two environment variables control the tool surface:
+
+- `SCIHUB_MCP_LOCAL_TOOLS` controls local tools.
+- `SCIHUB_MCP_TOOLS` controls integrated `paper-search-mcp` tools.
+
+A large tool surface degrades assistant tool-selection accuracy, so curated profiles
+are recommended for assistant clients.
+
+Local tools:
 
 | Value | Effect |
 | --- | --- |
-| `all` (default) | All integrated tools (62 total). |
-| `core` | Curated minimal set: `search_papers`, `download_with_fallback`, `get_crossref_paper_by_doi` (8 tools total with the 5 local). Recommended for Claude. |
-| `none` | Only the 5 local tools. |
+| `all` (default) | All local tools: `search`, `fetch`, DOI/title/keyword lookup, metadata, and PDF download. |
+| `chatgpt` or `standard` | Only `search` and `fetch`. Recommended for ChatGPT. |
+| `none` | No local tools. |
+| `a,b,c` | Explicit allowlist of local tool names; unknown names are ignored. |
+
+Integrated tools:
+
+| Value | Effect |
+| --- | --- |
+| `all` (default) | All integrated tools. |
+| `core` | Curated minimal set: `search_papers`, `download_with_fallback`, `get_crossref_paper_by_doi`. Recommended for Claude and Codex. |
+| `chatgpt` or `none` | No integrated tools. Use with `SCIHUB_MCP_LOCAL_TOOLS=chatgpt` for a read-only ChatGPT app. |
 | `a,b,c` | Explicit allowlist of integrated tool names; unknown names are ignored. |
 
 ### Local Tools
 
 | Tool | Purpose |
 | --- | --- |
+| `search` | Standard read-only search tool for ChatGPT/Codex data clients. |
+| `fetch` | Standard read-only fetch tool for a DOI returned by `search`. |
 | `search_scihub_by_doi` | Resolve a DOI to a full-text URL, open-access first, Sci-Hub last resort. |
 | `search_scihub_by_title` | Resolve a title via CrossRef, then the same open-access-first chain. |
 | `search_scihub_by_keyword` | Find keyword matches via CrossRef that have an open-access full text (no Sci-Hub fallback). |

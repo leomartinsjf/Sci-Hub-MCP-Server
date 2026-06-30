@@ -20,9 +20,10 @@ LOGGER = logging.getLogger(__name__)
 PAPER_SEARCH_MCP_COMMIT = "dba2c7430aec7e17463ad981caf1d391f0204335"
 
 # Env var selecting which upstream paper-search tools to register. Accepts "all"
-# (default), "core" (a curated minimal set for Claude), "none", or an explicit
-# comma-separated allowlist of tool names. A large tool surface degrades Claude's
-# tool-selection accuracy and consumes context, so "core" is recommended for Claude.
+# (default), "core" (a curated minimal set for Claude/Codex), "chatgpt" / "none",
+# or an explicit comma-separated allowlist of tool names. A large tool surface
+# degrades assistant tool-selection accuracy and consumes context, so lean profiles
+# are recommended for assistant clients.
 TOOL_SELECTION_ENV = "SCIHUB_MCP_TOOLS"
 
 TOOL_PROFILES = {
@@ -31,6 +32,7 @@ TOOL_PROFILES = {
         "download_with_fallback",
         "get_crossref_paper_by_doi",
     ],
+    "chatgpt": [],
     "none": [],
 }
 

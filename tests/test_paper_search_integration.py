@@ -87,6 +87,12 @@ def test_should_select_core_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _selected_tool_names() == TOOL_PROFILES["core"]
 
 
+def test_should_select_chatgpt_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(TOOL_SELECTION_ENV, "chatgpt")
+
+    assert _selected_tool_names() == []
+
+
 def test_should_select_no_upstream_tools_for_none_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
