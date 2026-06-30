@@ -1,0 +1,12 @@
+- main [ref=e2]:
+  - heading "I-CIA/SINAIA" [level=1] [ref=e3]
+  - paragraph [ref=e4]: Console institucional v1.6.3
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - text: Email
+      - textbox "Email" [ref=e7]: admin@icia.local
+    - generic [ref=e8]:
+      - text: Senha
+      - textbox "Senha" [ref=e9]
+    - button "Entrar" [ref=e10] [cursor=pointer]
+  - paragraph [ref=e11]: "Ambiente de desenvolvimento: admin@icia.local / admin123. Trocar antes de qualquer uso real."

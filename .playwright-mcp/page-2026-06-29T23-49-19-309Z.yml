@@ -1,0 +1,99 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - heading "I-CIA/SINAIA Admin Console v0.7" [level=1] [ref=e3]
+    - paragraph [ref=e4]: "Operação científica: sintético prepara; humano valida; psicometria calibra."
+    - navigation [ref=e5]:
+      - link "Visão geral" [ref=e6] [cursor=pointer]:
+        - /url: /admin
+      - link "Itens" [ref=e7] [cursor=pointer]:
+        - /url: /admin/items
+      - link "Delphi" [ref=e8] [cursor=pointer]:
+        - /url: /admin/delphi
+      - link "Cognitivas" [ref=e9] [cursor=pointer]:
+        - /url: /admin/cognitive
+      - link "Sandbox" [ref=e10] [cursor=pointer]:
+        - /url: /admin/sandbox
+      - link "Jobs" [ref=e11] [cursor=pointer]:
+        - /url: /admin/jobs
+      - link "Evidências" [ref=e12] [cursor=pointer]:
+        - /url: /admin/evidence
+      - link "Gold set" [ref=e13] [cursor=pointer]:
+        - /url: /admin/goldset
+      - link "Campo real" [ref=e14] [cursor=pointer]:
+        - /url: /admin/field
+      - link "Campo v0.9" [ref=e15] [cursor=pointer]:
+        - /url: /admin/field-plus
+      - link "Piloto v1.0" [ref=e16] [cursor=pointer]:
+        - /url: /admin/pilot
+      - link "Análise v1.1" [ref=e17] [cursor=pointer]:
+        - /url: /admin/analysis
+      - link "Workbench v1.2" [ref=e18] [cursor=pointer]:
+        - /url: /admin/workbench
+      - link "Calibration v1.3" [ref=e19] [cursor=pointer]:
+        - /url: /admin/calibration
+      - link "LGPD/Deploy" [ref=e20] [cursor=pointer]:
+        - /url: /admin/privacy
+      - button "Sair" [ref=e22] [cursor=pointer]
+      - link "Standard Setting" [ref=e23] [cursor=pointer]:
+        - /url: /admin/standard-setting
+      - link "Reporting v1.5" [ref=e24] [cursor=pointer]:
+        - /url: /admin/reporting
+  - main [ref=e25]:
+    - generic [ref=e26]:
+      - link "Banco de itens Versionamento, status, exposição e segurança." [ref=e27] [cursor=pointer]:
+        - /url: /admin/items
+        - heading "Banco de itens" [level=2] [ref=e28]
+        - paragraph [ref=e29]: Versionamento, status, exposição e segurança.
+      - link "Delphi real Painel, assignments e ratings humanos." [ref=e30] [cursor=pointer]:
+        - /url: /admin/delphi
+        - heading "Delphi real" [level=2] [ref=e31]
+        - paragraph [ref=e32]: Painel, assignments e ratings humanos.
+      - link "Entrevistas cognitivas Participantes, sessões e códigos CP1–CP12." [ref=e33] [cursor=pointer]:
+        - /url: /admin/cognitive
+        - heading "Entrevistas cognitivas" [level=2] [ref=e34]
+        - paragraph [ref=e35]: Participantes, sessões e códigos CP1–CP12.
+      - link "GenAI Sandbox Tarefas, sessões, eventos e scoring." [ref=e36] [cursor=pointer]:
+        - /url: /admin/sandbox
+        - heading "GenAI Sandbox" [level=2] [ref=e37]
+        - paragraph [ref=e38]: Tarefas, sessões, eventos e scoring.
+      - link "Jobs e workers Fila, lease, retry e backoff." [ref=e39] [cursor=pointer]:
+        - /url: /admin/jobs
+        - heading "Jobs e workers" [level=2] [ref=e40]
+        - paragraph [ref=e41]: Fila, lease, retry e backoff.
+      - link "LGPD/deploy Preflight, retenção e mapa de dados." [ref=e42] [cursor=pointer]:
+        - /url: /admin/privacy
+        - heading "LGPD/deploy" [level=2] [ref=e43]
+        - paragraph [ref=e44]: Preflight, retenção e mapa de dados.
+    - generic [ref=e45]:
+      - heading "Itens recentes" [level=2] [ref=e46]
+      - table [ref=e47]:
+        - rowgroup [ref=e48]:
+          - row "ID Versão C Nível Status Exposição" [ref=e49]:
+            - columnheader "ID" [ref=e50]
+            - columnheader "Versão" [ref=e51]
+            - columnheader "C" [ref=e52]
+            - columnheader "Nível" [ref=e53]
+            - columnheader "Status" [ref=e54]
+            - columnheader "Exposição" [ref=e55]
+        - rowgroup [ref=e56]:
+          - row "ICIA_C9_CALIBRACAO_METAC_FC25B497 v0.3-draft C9 3 pilot_ready 0" [ref=e57]:
+            - cell "ICIA_C9_CALIBRACAO_METAC_FC25B497" [ref=e58]
+            - cell "v0.3-draft" [ref=e59]
+            - cell "C9" [ref=e60]
+            - cell "3" [ref=e61]
+            - cell "pilot_ready" [ref=e62]
+            - cell "0" [ref=e63]
+          - row "ICIA_C5_PRIVACIDADE_E_DA_CD42E9A4 v0.3-draft C5 2 pilot_ready 0" [ref=e64]:
+            - cell "ICIA_C5_PRIVACIDADE_E_DA_CD42E9A4" [ref=e65]
+            - cell "v0.3-draft" [ref=e66]
+            - cell "C5" [ref=e67]
+            - cell "2" [ref=e68]
+            - cell "pilot_ready" [ref=e69]
+            - cell "0" [ref=e70]
+          - row "ICIA_C4_AVALIACAO_CRITIC_04558370 v0.3-draft C4 3 pilot_ready 0" [ref=e71]:
+            - cell "ICIA_C4_AVALIACAO_CRITIC_04558370" [ref=e72]
+            - cell "v0.3-draft" [ref=e73]
+            - cell "C4" [ref=e74]
+            - cell "3" [ref=e75]
+            - cell "pilot_ready" [ref=e76]
+            - cell "0" [ref=e77]
