@@ -24,6 +24,15 @@ Then open Claude Code from the repository root and verify the server:
 claude mcp list
 ```
 
+This repository also includes Claude-compatible skills in `.claude/skills/`:
+
+- `$scientific-literature-search`
+- `$literature-review-synthesis`
+- `$research-quality-appraisal`
+- `$research-impact-assessment`
+
+See [`docs/skills.md`](skills.md) for the skill boundaries and method anchors.
+
 ## Claude Desktop Or Other Local MCP Clients
 
 After `pip install -e .`, a local stdio client can start the server with the console

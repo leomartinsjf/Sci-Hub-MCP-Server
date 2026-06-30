@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Literature Search"
+  short_description: "Build reproducible scholarly searches"
+  default_prompt: "Use $scientific-literature-search to design and document an OA-first search strategy."

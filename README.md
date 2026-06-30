@@ -171,6 +171,7 @@ Put HTTPS in front of `/mcp` before registering it as a remote MCP endpoint.
 - Codex setup: [`docs/codex.md`](docs/codex.md)
 - ChatGPT tool-only app setup: [`docs/chatgpt.md`](docs/chatgpt.md)
 - Claude setup: [`docs/claude.md`](docs/claude.md)
+- Scientific research skills: [`docs/skills.md`](docs/skills.md)
 
 For ChatGPT, use the read-only profile:
 
@@ -181,6 +182,20 @@ SCIHUB_MCP_ENABLE_SCIHUB_FALLBACK=0
 ```
 
 That exposes only `search` and `fetch`.
+
+## Scientific Research Skills
+
+The repository ships cross-vendor skills under `.agents/skills/` for Codex/OpenAI
+and `.claude/skills/` for Claude/Anthropic:
+
+- `scientific-literature-search`
+- `literature-review-synthesis`
+- `research-quality-appraisal`
+- `research-impact-assessment`
+
+They guide agents through reproducible literature search, review synthesis,
+study-quality appraisal, and responsible impact assessment while preserving the
+OA-first safety boundary.
 
 ## Claude Desktop Configuration
 

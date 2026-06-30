@@ -73,9 +73,21 @@ exposes is the MCP server identity:
 - HTTP endpoint: `https://your-domain.example/mcp`
 - package install: `pip install .` or `pip install -e .`
 - safe assistant profile: `SCIHUB_MCP_TOOLS=core`
+- repository skills: `.agents/skills/`
 
 For managed or bundled plugin deployments, keep the command/URL identity above
 unchanged and apply tool allowlists in Codex configuration when needed.
+
+## Scientific Skills
+
+Codex can use the repository skills in `.agents/skills/`:
+
+- `$scientific-literature-search`
+- `$literature-review-synthesis`
+- `$research-quality-appraisal`
+- `$research-impact-assessment`
+
+See [`docs/skills.md`](skills.md) for the skill boundaries and method anchors.
 
 ## Read-Only OA Profile
 

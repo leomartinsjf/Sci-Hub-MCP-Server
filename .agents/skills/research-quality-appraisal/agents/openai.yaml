@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Quality Appraisal"
+  short_description: "Assess study quality and bias risk"
+  default_prompt: "Use $research-quality-appraisal to appraise risk of bias and evidence certainty."

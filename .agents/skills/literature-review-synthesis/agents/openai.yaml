@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature Review Synthesis"
+  short_description: "Synthesize studies into cautious evidence"
+  default_prompt: "Use $literature-review-synthesis to extract, compare, and synthesize a paper set."

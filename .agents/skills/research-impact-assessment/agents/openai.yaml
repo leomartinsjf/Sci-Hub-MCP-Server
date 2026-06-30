@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Impact Assessment"
+  short_description: "Assess research influence responsibly"
+  default_prompt: "Use $research-impact-assessment to evaluate research impact without overusing journal metrics."
